@@ -1,0 +1,74 @@
+# Yvan J. Aquino, yaquino@google.com
+# Example provided 'as is'.  
+
+# gcloud builds submit --substitutions _DATASET=gsa,_TABLE_ID=covid_screenings
+
+# Requirements:
+  # Create a new project.
+  # Enable the appropriate APIs: Compute Engine, App Engine, Pub/Sub, BigQuery, Cloud Functions, Cloud Build, App Engine Admin API
+  # YOU MUST ENABLE THE APP ENGINE ADMIN API!
+  # Configure the Cloud Build Service Account:
+    # Console -> Cloud Build -> Settings: ENABLE Cloud Functions, App Engine, Compute Engine
+    # IAM & Admin -> IAM: Add BigQueryAdmin, Pub/Sub Admin to Cloud Build Service Account (###...@cloudbuild.gserviceaccount.com)
+
+# Instructions: 
+  # Get a copy of this source via github and review the cloudbuild.yaml file closely.
+  # run the gcloud builds submit command as above (gcloud builds submit --substitutions _DATASET=gsa,_TABLE_ID=covid_screenings)
+  # test..!
+
+# Troubleshooting:
+  # Sometimes the Cloud Build - Service Account Enablement doesn't work well.  You may need to manually add 
+  
+
+steps:
+  # gcloud SDK: Create a BigQuery dataset
+- name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
+  args: [
+    'bq', '--location', 'us', 'mk', '--dataset',
+    '$PROJECT_ID:${_DATASET}'
+  ]
+  # gcloud SDK: Create a BigQuery table
+- name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
+  id: 'bq-table'
+  args: [
+    'bq', 'mk', '--table', '$PROJECT_ID:${_DATASET}.${_TABLE_ID}',
+    '${_SCHEMA}'  
+    ]
+  # gcloud SDK: Create a Pub/Sub topic
+- name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
+  id: 'ps-topic'
+  waitFor: ['-']
+  args: [
+    'gcloud', 'pubsub', 'topics', 'create', '${_TOPIC}'
+    ]
+  # gcloud SDK: Create the Functions function
+- name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
+  waitFor: ['bq-table', 'ps-topic']
+  args: [
+    'gcloud', 'functions', 'deploy', '${_FUNC_NAME}', 
+    '--region', 'us-central1',
+    '--trigger-topic', '${_TOPIC}',
+    '--runtime', 'python39',
+    '--entry-point', 'ps2bq',
+    '--source', 'cloud-function',
+    '--set-env-vars', 'TABLE_ID=$PROJECT_ID.${_DATASET}.${_TABLE_ID}'
+    ]
+  env:
+  - 'TABLE_ID=$PROJECT_ID.${_DATASET}.${_TABLE_ID}'
+  # gcloud SDK: Create the App Engine service
+- name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
+  waitFor: ['bq-table', 'ps-topic']
+  entrypoint: bash
+  args:
+  - '-c'
+  - |
+    sed -i 's/--PROJECT_ID/$PROJECT_ID/g' app-engine/app.yaml
+    sed -i 's/--TOPIC/${_TOPIC}/g' app-engine/app.yaml 
+    gcloud app deploy app-engine/app.yaml
+# Defaults for the substitution variables.  
+substitutions: 
+  _DATASET: 'gsa'
+  _TABLE_ID: 'covid_screenings'
+  _SCHEMA: 'iss:STRING,sub:STRING,email:STRING,ial:STRING,aal:STRING,res:STRING,ipa:STRING,loc:STRING'
+  _TOPIC: 'screenings'
+  _FUNC_NAME: 'func-screenings-ps2bq'

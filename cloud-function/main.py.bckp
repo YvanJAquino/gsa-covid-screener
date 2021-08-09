@@ -1,0 +1,17 @@
+import json
+import base64
+from google.cloud import bigquery
+import os
+
+bq = bigquery.Client()
+_table_id = os.environ.get('TABLE_ID')
+print(_table_id)
+table_id = 'x-oxygen-322223.gsa.covid_screenings'
+def hello_pubsub(event, context):
+    
+    if 'data' in event:
+        data: str = base64.b64decode(event['data']).decode('utf-8')
+        data: dict = json.loads(data)
+    bq.insert_rows_json(table_id, [data])
+
+    print(json.dumps(data))
